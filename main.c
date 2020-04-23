@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2018 OTA keys S.A.
- *               2018 Inria
+ * Copyright (C) 2020 Peter Sjödin, KTH
  *
  * This file is subject to the terms and conditions of the GNU Lesser
  * General Public License v2.1. See the file LICENSE in the top level
