@@ -43,14 +43,20 @@ int sim7020_init(uint8_t uart, uint32_t baudrate) {
     /* Receive data as hex string */
     res = at_send_cmd_wait_ok(&at_dev, "AT+CSORCVFLAG=0", 5000000);
 
+#ifdef SIM7020_RECVHEX
+    /* Receive data as hex string */
+    res = at_send_cmd_wait_ok(&at_dev, "AT+CSORCVFLAG=0", 5000000);
+#else  
+    /* Receive binary data */
+    res = at_send_cmd_wait_ok(&at_dev, "AT+CSORCVFLAG=1", 5000000);
+#endif /* SIM7020_RECVHEX */
+
     //Telia is 24001
     //res = at_send_cmd_wait_ok(&at_dev, "AT+COPS=1,2,\"24002\"", 5000000);
 
-    /* Request International Mobile Subscriber Identity */
-    res = at_send_cmd_get_resp(&at_dev, "AT+CIMI", resp, sizeof(resp), 10*1000000);
+    /* Signal Quality Report */
+    res = at_send_cmd_get_resp(&at_dev, "AT+CSQ", resp, sizeof(resp), 10*1000000);
 
-    /* Request TA Serial Number Identification (IMEI) */
-    res = at_send_cmd_get_resp(&at_dev, "AT+GSN", resp, sizeof(resp), 10*1000000);
     return res;
 }
 
@@ -90,28 +96,22 @@ int sim7020_register(void) {
     xtimer_sleep(5);
 
   }
-  /* Report Network State */
-
-  res = at_send_cmd_get_resp(&at_dev,"AT+CSTT?", resp, sizeof(resp), 120*1000000);
-res = at_send_cmd_get_resp(&at_dev,"AT+CSTT=\"lpwa.telia.iot\",\"\",\"\"\r", resp, sizeof(resp), 120*1000000); /* Start task and set APN */
-  res = at_send_cmd_get_resp(&at_dev,"AT+CSTT?", resp, sizeof(resp), 120*1000000);
-  //"lpwa.telia.iot"
 
   return 1;
 }
 
 int sim7020_activate(void) {
   int res;
-  uint8_t attempts = 8;
+  uint8_t attempts = 3;
   
   res = at_send_cmd_get_resp(&at_dev,"AT+CSTT?", resp, sizeof(resp), 120*1000000);
   /* Start Task and Set APN, USER NAME, PASSWORD */
-  res = at_send_cmd_get_resp(&at_dev,"AT+CSTT=\"lpwa.telia.iot\",\"\",\"\"\r", resp, sizeof(resp), 120*1000000);
+  res = at_send_cmd_get_resp(&at_dev,"AT+CSTT=\"lpwa.telia.iot\",\"\",\"\"", resp, sizeof(resp), 120*1000000);
   /* Start task and set APN */
-  res = at_send_cmd_get_resp(&at_dev,"AT+CSTT?", resp, sizeof(resp), 120*1000000);
+  //res = at_send_cmd_get_resp(&at_dev,"AT+CSTT?", resp, sizeof(resp), 120*1000000);
   //"lpwa.telia.iot"
   
-  while (0 && attempts--) {
+  while (attempts--) {
     /* Bring Up Wireless Connection with GPRS or CSD */
     res = at_send_cmd_wait_ok(&at_dev, "AT+CIICR", 600*1000000);
     if (res == 0) {
@@ -137,18 +137,23 @@ int sim7020_status(void) {
   /* Report Network State */
   res = at_send_cmd_get_resp(&at_dev,"AT+CENG?", resp, sizeof(resp), 60*1000000);
 
+  /* Signal Quality Report */
+  res = at_send_cmd_wait_ok(&at_dev,"AT+CSQ", 60*1000000);
   /* Task status, APN */
   res = at_send_cmd_get_resp(&at_dev,"AT+CSTT?", resp, sizeof(resp), 60*1000000);
 
   /* Get Local IP Address */
   res = at_send_cmd_get_resp(&at_dev,"AT+CIFSR", resp, sizeof(resp), 60*1000000);
+  /* PDP Context Read Dynamic Parameters */
+  res = at_send_cmd_get_resp(&at_dev,"AT+CGCONTRDP", resp, sizeof(resp), 60*1000000);
   return res;
 }
 
 int sim7020_udp_socket(void) {
   int res;
   /* Create a socket: IPv4, UDP, 1 */
-    res = at_send_cmd_get_resp(&at_dev, "AT+CSOC=1,2,1", resp, sizeof(resp), 120*1000000);
+  //res = at_send_cmd_get_resp(&at_dev, "AT+CSOC=1,1,1", resp, sizeof(resp), 120*1000000);
+  res = at_send_cmd_get_resp(&at_dev, "AT+CSOC=1,2,1", resp, sizeof(resp), 120*1000000);    
     if (res > 0) {
       uint8_t sockid;
 
@@ -159,8 +164,23 @@ int sim7020_udp_socket(void) {
       else
         printf("Parse error: '%s'\n", resp);
     }
+    else
+      at_drain(&at_dev);
     return res;
 }
+
+int sim7020_close(uint8_t sockid) {
+
+  int res;
+  char cmd[64];
+
+
+  sprintf(cmd, "AT+CSOCL=%d", sockid);
+
+  res = at_send_cmd_wait_ok(&at_dev, cmd, 120*1000000);
+  return res;
+}
+
 
 int sim7020_connect(uint8_t sockid, char *ipaddr, uint16_t port) {
 
@@ -176,4 +196,46 @@ int sim7020_connect(uint8_t sockid, char *ipaddr, uint16_t port) {
 }
 
 
-int sim7020_send(uint8_t sockid, char *data, size_t datalen);
+#define AT_RADIO_MAX_SEND_LEN 128
+int sim7020_send(uint8_t sockid, uint8_t *data, size_t datalen) {
+  int res;
+
+  size_t len = (datalen < AT_RADIO_MAX_SEND_LEN ? datalen : AT_RADIO_MAX_SEND_LEN);
+  char cmd[32];
+  at_drain(&at_dev);
+  snprintf(cmd, sizeof(cmd), "AT+CSODSEND=%d,%d", sockid, len);
+  res = at_send_cmd(&at_dev, cmd, 10*1000000);
+  res = at_expect_bytes(&at_dev, "> ", 10*1000000);
+  if (res != 0) {
+    printf("No send prompt\n");
+    return res;
+  }
+  if (res == 0) {
+    at_send_bytes(&at_dev, (char *) data, len);
+    while (1) {
+      unsigned int nsent;
+      res = at_readline(&at_dev, resp, sizeof(resp), 0, 10*1000000);
+      if (res < 0) {
+        printf("Timeout waiting for DATA ACCEPT confirmation\n");
+        return res;
+      }
+      if (1 == (sscanf(resp, "DATA ACCEPT: %d", &nsent))) {
+        return nsent;
+      }
+    }
+  }
+  return 0;
+}
+
+int sim7020_test(uint8_t sockid) {
+  static char testbuf[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVXYZ";
+  
+  for (int tests = 0; tests < 3; tests++) {
+    for (unsigned int i = 1; i < sizeof(testbuf); i++) {
+      if (sim7020_send(sockid, (uint8_t *) testbuf, i) < 0)
+        return -1;
+      xtimer_sleep(3);
+    }
+  }
+  return 0;
+}

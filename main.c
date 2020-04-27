@@ -286,8 +286,10 @@ int sim7020cmd_register(int argc, char **argv);
 int sim7020cmd_activate(int argc, char **argv);
 int sim7020cmd_status(int argc, char **argv);
 int sim7020cmd_udp_socket(int argc, char **argv);
+int sim7020cmd_close(int argc, char **argv);
 int sim7020cmd_connect(int argc, char **argv);
 int sim7020cmd_send(int argc, char **argv);
+int sim7020cmd_test(int argc, char **argv);
 #endif /* SIM7020 */
 static const shell_command_t shell_commands[] = {
     { "initdev", "Initialize AT device", init },
@@ -312,7 +314,10 @@ static const shell_command_t shell_commands[] = {
     { "act", "Activate SIM7020", sim7020cmd_activate },    
     { "status", "Report SIM7020 status", sim7020cmd_status },
     { "usock", "Create SIM7020 UDP socket", sim7020cmd_udp_socket },        
-    { "con", "Connect SIM7020 socket", sim7020cmd_connect },        
+    { "ucon", "Connect SIM7020 socket", sim7020cmd_connect },
+    { "usend", "Send on SIM7020 socket", sim7020cmd_send },
+    { "uclose", "Close SIM7020 socket", sim7020cmd_close },
+    { "utest", "repeat usend", sim7020cmd_test },                
 #endif /* SIM7020 */
 
     { NULL, NULL, NULL },

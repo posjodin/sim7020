@@ -74,6 +74,22 @@ int sim7020cmd_udp_socket(int argc, char **argv) {
   return res;
 }
 
+int sim7020cmd_close(int argc, char **argv) {
+  uint8_t sockid;
+  
+  if (argc != 2) {
+    printf("Usage: %s sockid\n", argv[0]);
+    return 1;
+  }
+  sockid = atoi(argv[1]);
+  int res = sim7020_close(sockid);
+  if (res < 0)
+    printf("Error %d\n", res);
+  else
+    printf("OK");
+  return res;
+}
+
 int sim7020cmd_connect(int argc, char **argv) {
   uint8_t sockid;
   char *ipaddr;
@@ -93,3 +109,38 @@ int sim7020cmd_connect(int argc, char **argv) {
     printf("OK");
   return res;
 }
+
+int sim7020cmd_send(int argc, char **argv) {
+  uint8_t sockid;
+  char *data;
+  
+  if (argc < 3) {
+    printf("Usage: %s sockid data\n", argv[0]);
+    return 1;
+  }
+  sockid = atoi(argv[1]);
+  data = argv[2];
+  int res = sim7020_send(sockid, (uint8_t *) data, strlen(data));
+  if (res < 0)
+    printf("Error %d\n", res);
+  else
+    printf("OK");
+  return res;
+}
+
+int sim7020cmd_test(int argc, char **argv) {
+  uint8_t sockid;
+  
+  if (argc < 2) {
+    printf("Usage: %s sockid\n", argv[0]);
+    return 1;
+  }
+  sockid = atoi(argv[1]);
+  int res = sim7020_test(sockid);
+  if (res < 0)
+    printf("Error %d\n", res);
+  else
+    printf("OK");
+  return res;
+}
+
