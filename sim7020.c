@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "at.h"
 #include "xtimer.h"
@@ -17,6 +18,8 @@
 static at_dev_t at_dev;
 static char buf[256];
 static char resp[1024];
+
+ mutex_t sim7020_lock = MUTEX_INIT;
 
 int sim7020_init(uint8_t uart, uint32_t baudrate) {
 
@@ -43,6 +46,7 @@ int sim7020_init(uint8_t uart, uint32_t baudrate) {
     /* Receive data as hex string */
     res = at_send_cmd_wait_ok(&at_dev, "AT+CSORCVFLAG=0", 5000000);
 
+#define SIM7020_RECVHEX
 #ifdef SIM7020_RECVHEX
     /* Receive data as hex string */
     res = at_send_cmd_wait_ok(&at_dev, "AT+CSORCVFLAG=0", 5000000);
@@ -105,11 +109,12 @@ int sim7020_activate(void) {
   uint8_t attempts = 3;
   
   res = at_send_cmd_get_resp(&at_dev,"AT+CSTT?", resp, sizeof(resp), 120*1000000);
+  if (res > 0) {
+    if (strncmp("+CSTT: \"\"", resp, sizeof("+CSTT: \"\"")-1) != 0)
+      return 0;
+  }
   /* Start Task and Set APN, USER NAME, PASSWORD */
   res = at_send_cmd_get_resp(&at_dev,"AT+CSTT=\"lpwa.telia.iot\",\"\",\"\"", resp, sizeof(resp), 120*1000000);
-  /* Start task and set APN */
-  //res = at_send_cmd_get_resp(&at_dev,"AT+CSTT?", resp, sizeof(resp), 120*1000000);
-  //"lpwa.telia.iot"
   
   while (attempts--) {
     /* Bring Up Wireless Connection with GPRS or CSD */
@@ -152,13 +157,11 @@ int sim7020_status(void) {
 int sim7020_udp_socket(void) {
   int res;
   /* Create a socket: IPv4, UDP, 1 */
-  //res = at_send_cmd_get_resp(&at_dev, "AT+CSOC=1,1,1", resp, sizeof(resp), 120*1000000);
   res = at_send_cmd_get_resp(&at_dev, "AT+CSOC=1,2,1", resp, sizeof(resp), 120*1000000);    
     if (res > 0) {
       uint8_t sockid;
 
       if (1 == (sscanf(resp, "+CSOC: %hhd", &sockid))) {
-        printf("Socket no %d\n", sockid);
         return sockid;
       }
       else
@@ -202,13 +205,16 @@ int sim7020_send(uint8_t sockid, uint8_t *data, size_t datalen) {
 
   size_t len = (datalen < AT_RADIO_MAX_SEND_LEN ? datalen : AT_RADIO_MAX_SEND_LEN);
   char cmd[32];
+
+
+  mutex_lock(&sim7020_lock);
   at_drain(&at_dev);
   snprintf(cmd, sizeof(cmd), "AT+CSODSEND=%d,%d", sockid, len);
   res = at_send_cmd(&at_dev, cmd, 10*1000000);
   res = at_expect_bytes(&at_dev, "> ", 10*1000000);
   if (res != 0) {
     printf("No send prompt\n");
-    return res;
+    goto out;
   }
   if (res == 0) {
     at_send_bytes(&at_dev, (char *) data, len);
@@ -217,24 +223,85 @@ int sim7020_send(uint8_t sockid, uint8_t *data, size_t datalen) {
       res = at_readline(&at_dev, resp, sizeof(resp), 0, 10*1000000);
       if (res < 0) {
         printf("Timeout waiting for DATA ACCEPT confirmation\n");
-        return res;
+        goto out;
       }
       if (1 == (sscanf(resp, "DATA ACCEPT: %d", &nsent))) {
-        return nsent;
+        res = nsent;
+        goto out;
       }
     }
   }
-  return 0;
+  res = 0;
+ out:
+  mutex_unlock(&sim7020_lock);
+  return res;
 }
 
-int sim7020_test(uint8_t sockid) {
+static uint8_t recv_buf[AT_RADIO_MAX_RECV_LEN];
+
+static void _recv_cb(void *arg, const char *code) {
+  (void) arg;
+  int sockid, len;
+  printf("recv_cb for code '%s'\n", code);
+  int res = sscanf(code, "+CSONMI: %d,%d,", &sockid, &len);
+  if (res == 2) {
+    printf("GOt %d bytes on sockid %d\n", len, sockid);
+    /* Data is encoded as hex string, so
+     * data length is half the string length */ 
+
+    int rcvlen = len >> 1;
+
+    if (rcvlen >  AT_RADIO_MAX_RECV_LEN)
+      return; /* Too large */
+    /* Find first char after second comma */
+    char *ptr = strchr(strchr(code, ',')+1, ',')+1;
+    
+    for (int i = 0; i < rcvlen; i++) {
+      char hexstr[3];
+      hexstr[0] = *ptr++; hexstr[1] = *ptr++; hexstr[2] = '\0';
+      printf("hexstr %d: '%s' ", i, hexstr);
+      recv_buf[i] = (uint8_t) strtoul(hexstr, NULL, 16);
+      printf("-> %d\n", recv_buf[i]);
+    }
+    for (int i = 0; i < rcvlen; i++) {
+      if (isprint(recv_buf[i]))
+        putchar(recv_buf[i]);
+      else
+        printf("0x%02x", recv_buf[i]);
+      putchar(' ');
+    }
+    putchar('\n');
+  }
+  else
+    printf("recv_cb res %d\n", res);
+}
+
+void *sim7020_recv_thread(void *arg) {
+  unsigned int runsecs = (unsigned int) arg;
+  at_urc_t urc;
+
+  (void) runsecs;
+  urc.cb = _recv_cb;
+  urc.code = "+CSONMI:";
+  urc.arg = NULL;
+  at_add_urc(&at_dev, &urc);
+  while (1) {
+    mutex_lock(&sim7020_lock);
+    at_process_urc(&at_dev, 1000*(uint32_t) 1000);
+    mutex_unlock(&sim7020_lock);
+  }
+}
+
+int sim7020_test(uint8_t sockid, int count) {
   static char testbuf[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVXYZ";
   
-  for (int tests = 0; tests < 3; tests++) {
-    for (unsigned int i = 1; i < sizeof(testbuf); i++) {
+  while (count > 0) {
+  for (unsigned int i = 1; i < sizeof(testbuf) && count > 0; i++) {
       if (sim7020_send(sockid, (uint8_t *) testbuf, i) < 0)
         return -1;
       xtimer_sleep(3);
+      if (count > 0)
+        count--;
     }
   }
   return 0;

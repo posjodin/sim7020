@@ -24,6 +24,13 @@ CFLAGS += -DI2C_NUMOF=\(1U\) -DI2C_BUS_SPEED=I2C_SPEED_NORMAL
 # Print incoming AT bytes
 CFLAGS += -DAT_PRINT_INCOMING
 
+# Max no of incoming bytes
+CFLAGS += -DAT_RADIO_MAX_RECV_LEN=512
+
+# Size of buffer for incoming AT data (hex coded, so twice the
+# size of incoming buffer plus EOL marks and NULL char)
+CFLAGS += -DAT_BUF_SIZE=\(2*AT_RADIO_MAX_RECV_LEN+3\)
+
 # If you want to use native with valgrind, you should recompile native
 # with the target all-valgrind instead of all:
 # make -B clean all-valgrind

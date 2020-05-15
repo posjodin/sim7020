@@ -128,15 +128,42 @@ int sim7020cmd_send(int argc, char **argv) {
   return res;
 }
 
-int sim7020cmd_test(int argc, char **argv) {
-  uint8_t sockid;
+static char recvstack[THREAD_STACKSIZE_DEFAULT];
+
+#define SIM7020_PRIO         (THREAD_PRIORITY_MAIN + 1)
+
+int sim7020cmd_recv(int argc, char **argv) {
+  unsigned int runsecs;
   
   if (argc < 2) {
-    printf("Usage: %s sockid\n", argv[0]);
+    printf("Usage: %s runsecs\n", argv[0]);
+    return 1;
+  }
+  runsecs = atoi(argv[1]);
+  /* start the emcute thread */
+  //kernel_pid_t thread_create(char *stack, int stacksize, uint8_t priority, int flags, thread_task_func_t function, void *arg, const char *name)
+
+  thread_create(recvstack, sizeof(recvstack), SIM7020_PRIO, 0,
+                sim7020_recv_thread, (void *) runsecs, "sim7020");
+  printf("Receive thread started\n");
+  return 0;
+}
+
+
+int sim7020cmd_test(int argc, char **argv) {
+  uint8_t sockid;
+  int count;
+  
+  if (argc < 2) {
+    printf("Usage: %s sockid [count]\n", argv[0]);
     return 1;
   }
   sockid = atoi(argv[1]);
-  int res = sim7020_test(sockid);
+  if (argc == 3)
+    count = atoi(argv[2]);
+  else
+    count = -1;
+  int res = sim7020_test(sockid, count);
   if (res < 0)
     printf("Error %d\n", res);
   else
