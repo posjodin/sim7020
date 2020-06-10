@@ -63,6 +63,13 @@ int sim7020_init(uint8_t uart, uint32_t baudrate) {
 
     return res;
 }
+/* Operator MCCMNC (mobile country code and mobile network code) */
+/* Telia */
+//#define OPERATOR "24001"
+//#define APN "lpwa.telia.iot"
+/* 3  */
+#define OPERATOR "24002"
+#define APN "internet"
 
 int sim7020_register(void) {
   int res;
@@ -77,14 +84,13 @@ int sim7020_register(void) {
     xtimer_sleep(5);
   }
 
-  res =at_send_cmd_wait_ok(&at_dev, "AT+COPS=1,2,\"24001\"", 120*1000000);
+  //res =at_send_cmd_wait_ok(&at_dev, "AT+COPS=1,2,\"24001\"", 120*1000000);
 
   int count = 0;
   while (1) {
 
-    if (++count % 20 == 0) {
-      res = at_send_cmd_get_resp(&at_dev, "AT+COPS=?", resp, sizeof(resp), 120*1000000);
-      res =at_send_cmd_wait_ok(&at_dev, "AT+COPS=1,2,\"24001\"", 5*1000000);
+    if (count++ % 8 == 0) {
+      res =at_send_cmd_wait_ok(&at_dev, "AT+COPS=1,2,\"" OPERATOR "\"", 120*1000000);
     }
       
     res = at_send_cmd_get_resp(&at_dev, "AT+CREG?", resp, sizeof(resp), 120*1000000);
@@ -114,8 +120,8 @@ int sim7020_activate(void) {
       return 0;
   }
   /* Start Task and Set APN, USER NAME, PASSWORD */
-  res = at_send_cmd_get_resp(&at_dev,"AT+CSTT=\"lpwa.telia.iot\",\"\",\"\"", resp, sizeof(resp), 120*1000000);
-  
+  //res = at_send_cmd_get_resp(&at_dev,"AT+CSTT=\"lpwa.telia.iot\",\"\",\"\"", resp, sizeof(resp), 120*1000000);
+  res = at_send_cmd_get_resp(&at_dev,"AT+CSTT=\"" APN "\",\"\",\"\"", resp, sizeof(resp), 120*1000000);  
   while (attempts--) {
     /* Bring Up Wireless Connection with GPRS or CSD */
     res = at_send_cmd_wait_ok(&at_dev, "AT+CIICR", 600*1000000);
@@ -130,6 +136,11 @@ int sim7020_activate(void) {
 
 int sim7020_status(void) {
   int res;
+
+  if (1) {
+    printf("Searching for operators, be patient\n");
+    res = at_send_cmd_get_resp(&at_dev, "AT+COPS=?", resp, sizeof(resp), 120*1000000);
+  }
   res = at_send_cmd_get_resp(&at_dev, "AT+CREG?", resp, sizeof(resp), 120*1000000);
   /* Request International Mobile Subscriber Identity */
   res = at_send_cmd_get_resp(&at_dev, "AT+CIMI", resp, sizeof(resp), 10*1000000);
