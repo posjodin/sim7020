@@ -10,6 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "net/af.h"
+#include "net/ipv4/addr.h"
+#include "net/ipv6/addr.h"
+#include "net/sock/udp.h"
+
 #include "periph/uart.h"
 
 #include "sim7020.h"
@@ -91,23 +96,33 @@ int sim7020cmd_close(int argc, char **argv) {
 }
 
 int sim7020cmd_connect(int argc, char **argv) {
-  uint8_t sockid;
-  char *ipaddr;
-  uint16_t port;
+    uint8_t sockid;
+    sock_udp_ep_t remote;
+
   
-  if (argc < 4) {
-    printf("Usage: %s sockid ipaddr port\n", argv[0]);
-    return 1;
-  }
-  sockid = atoi(argv[1]);
-  ipaddr = argv[2];
-  port = atoi(argv[3]);
-  int res = sim7020_connect(sockid, ipaddr, port);
-  if (res < 0)
-    printf("Error %d\n", res);
-  else
-    printf("OK");
-  return res;
+    if (argc < 4) {
+        printf("Usage: %s sockid ipaddr port\n", argv[0]);
+        return 1;
+    }
+    sockid = atoi(argv[1]);
+
+    remote.family = AF_INET6;
+    ipv6_addr_t *v6addr = (ipv6_addr_t *) remote.addr.ipv6;
+    /* Build ipv4-mapped address */
+    v6addr->u32[0].u32 = 0xffff; v6addr->u32[1].u32 = 0; v6addr->u32[2].u32 = 0;
+    if (NULL == ipv4_addr_from_str((ipv4_addr_t *) &v6addr->u32[3], argv[2])) {
+        printf("Usage: %s sockid ipaddr port\n", argv[0]);
+        return 1;
+    }
+    remote.netif = SOCK_ADDR_ANY_NETIF;
+    remote.port = atoi(argv[3]);
+    
+    int res = sim7020_connect(sockid, &remote);
+    if (res < 0)
+        printf("Error %d\n", res);
+    else
+        printf("OK");
+    return res;
 }
 
 int sim7020cmd_send(int argc, char **argv) {

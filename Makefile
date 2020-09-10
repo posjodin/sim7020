@@ -45,6 +45,8 @@ QUIET ?= 1
 
 # Modules to include:
 
+USEMODULE += ipv6_addr
+USEMODULE += ipv4_addr
 USEMODULE += shell
 #USEMODULE += posix_headers
 USEMODULE += at
@@ -56,7 +58,7 @@ USEMODULE += xtimer
 
 #DISABLE_MODULE += core_msg
 
-#INCLUDES += -Iapplication_include
+INCLUDES += -I$(CURDIR)/include -DSOCK_HAS_IPV6
 
 # Specify custom dependencies for your application here ...
 # APPDEPS = app_data.h config.h

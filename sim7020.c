@@ -10,14 +10,32 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
+
+#include "net/af.h"
+#include "net/ipv4/addr.h"
+#include "net/ipv6/addr.h"
+#include "net/sock/udp.h"
 
 #include "at.h"
 #include "xtimer.h"
 #include "periph/uart.h"
 
+#include "sim7020.h"
+
 static at_dev_t at_dev;
 static char buf[256];
 static char resp[1024];
+
+
+struct sock_sim7020 {
+    uint8_t sockid;
+    sim7020_recv_callback_t recv_callback;
+    void *recv_callback_arg;
+};
+typedef struct sock_sim7020 sim7020_socket_t;
+
+static sim7020_socket_t sim7020_sockets[SIM7020_MAX_SOCKETS];
 
  mutex_t sim7020_lock = MUTEX_INIT;
 
@@ -65,11 +83,11 @@ int sim7020_init(uint8_t uart, uint32_t baudrate) {
 }
 /* Operator MCCMNC (mobile country code and mobile network code) */
 /* Telia */
-//#define OPERATOR "24001"
-//#define APN "lpwa.telia.iot"
-/* 3  */
-#define OPERATOR "24002"
-#define APN "internet"
+#define OPERATOR "24001"
+#define APN "lpwa.telia.iot"
+/* Tre  */
+//#define OPERATOR "24002"
+//#define APN "internet"
 
 int sim7020_register(void) {
   int res;
@@ -90,7 +108,7 @@ int sim7020_register(void) {
   while (1) {
 
     if (count++ % 8 == 0) {
-      res =at_send_cmd_wait_ok(&at_dev, "AT+COPS=1,2,\"" OPERATOR "\"", 120*1000000);
+      res =at_send_cmd_wait_ok(&at_dev, "AT+COPS=1,2,\"" OPERATOR "\"", 240*1000000);
     }
       
     res = at_send_cmd_get_resp(&at_dev, "AT+CREG?", resp, sizeof(resp), 120*1000000);
@@ -165,21 +183,25 @@ int sim7020_status(void) {
   return res;
 }
 
-int sim7020_udp_socket(void) {
-  int res;
-  /* Create a socket: IPv4, UDP, 1 */
-  res = at_send_cmd_get_resp(&at_dev, "AT+CSOC=1,2,1", resp, sizeof(resp), 120*1000000);    
+int sim7020_udp_socket(const sim7020_recv_callback_t recv_callback, void *recv_callback_arg) {
+    int res;
+    /* Create a socket: IPv4, UDP, 1 */
+    res = at_send_cmd_get_resp(&at_dev, "AT+CSOC=1,2,1", resp, sizeof(resp), 120*1000000);    
     if (res > 0) {
-      uint8_t sockid;
+        uint8_t sockid;
 
-      if (1 == (sscanf(resp, "+CSOC: %hhd", &sockid))) {
-        return sockid;
-      }
-      else
-        printf("Parse error: '%s'\n", resp);
+        if (1 == (sscanf(resp, "+CSOC: %hhd", &sockid))) {
+            assert(sockid < SIM7020_MAX_SOCKETS);
+            sim7020_socket_t *sock = &sim7020_sockets[sockid];
+            sock->recv_callback = recv_callback;
+            sock->recv_callback_arg = recv_callback_arg;
+            return sockid;
+        }
+        else
+            printf("Parse error: '%s'\n", resp);
     }
     else
-      at_drain(&at_dev);
+        at_drain(&at_dev);
     return res;
 }
 
@@ -188,6 +210,9 @@ int sim7020_close(uint8_t sockid) {
   int res;
   char cmd[64];
 
+  assert(sockid < SIM7020_MAX_SOCKETS);
+  sim7020_socket_t *sock = &sim7020_sockets[sockid];
+  sock->recv_callback = NULL;
 
   sprintf(cmd, "AT+CSOCL=%d", sockid);
 
@@ -196,16 +221,37 @@ int sim7020_close(uint8_t sockid) {
 }
 
 
-int sim7020_connect(uint8_t sockid, char *ipaddr, uint16_t port) {
+int sim7020_connect(uint8_t sockid, const sock_udp_ep_t *remote) {
 
   int res;
   char cmd[64];
+  char ipv4str[IPV4_ADDR_MAX_STR_LEN];
+
+  assert(sockid < MAX_SIM7020_SOCKETS);
+
+  if (remote->family != AF_INET6) {
+      return -EAFNOSUPPORT;
+  }
+  if (!ipv6_addr_is_ipv4_mapped((ipv6_addr_t *) &remote->addr.ipv4)) {
+      printf("sim7020_connect: not ipv6 mapped ipv4: ");
+      ipv6_addr_print((ipv6_addr_t *) &remote->addr.ipv6);
+      printf("\n");
+      return -1;
+  }
+  if (remote->port == 0) {
+      return -EINVAL;
+  }
+
+  printf("Connectiing to ipv6 mapped ");
+  ipv6_addr_print((ipv6_addr_t *) &remote->addr.ipv6);
+  printf(" - %s\n", ipv4str);
 
   sprintf(cmd, "AT+CSOCON=%d,%d,%s",
-          sockid, port, ipaddr);
+          sockid, remote->port, ipv4str);
 
   /* Create a socket: IPv4, UDP, 1 */
   res = at_send_cmd_get_resp(&at_dev, cmd, resp, sizeof(resp), 120*1000000);
+  printf("socket connected: %d\n", res);
   return res;
 }
 
@@ -217,7 +263,7 @@ int sim7020_send(uint8_t sockid, uint8_t *data, size_t datalen) {
   size_t len = (datalen < AT_RADIO_MAX_SEND_LEN ? datalen : AT_RADIO_MAX_SEND_LEN);
   char cmd[32];
 
-
+  assert(sockid < MAX_SIM7020_SOCKETS);
   mutex_lock(&sim7020_lock);
   at_drain(&at_dev);
   snprintf(cmd, sizeof(cmd), "AT+CSODSEND=%d,%d", sockid, len);
@@ -251,40 +297,52 @@ int sim7020_send(uint8_t sockid, uint8_t *data, size_t datalen) {
 static uint8_t recv_buf[AT_RADIO_MAX_RECV_LEN];
 
 static void _recv_cb(void *arg, const char *code) {
-  (void) arg;
-  int sockid, len;
-  printf("recv_cb for code '%s'\n", code);
-  int res = sscanf(code, "+CSONMI: %d,%d,", &sockid, &len);
-  if (res == 2) {
-    printf("GOt %d bytes on sockid %d\n", len, sockid);
-    /* Data is encoded as hex string, so
-     * data length is half the string length */ 
+    (void) arg;
+    int sockid, len;
+    printf("recv_cb for code '%s'\n", code);
+    int res = sscanf(code, "+CSONMI: %d,%d,", &sockid, &len);
+    if (res == 2) {
+        printf("GOt %d bytes on sockid %d\n", len, sockid);
+        /* Data is encoded as hex string, so
+         * data length is half the string length */ 
 
-    int rcvlen = len >> 1;
+        int rcvlen = len >> 1;
 
-    if (rcvlen >  AT_RADIO_MAX_RECV_LEN)
-      return; /* Too large */
-    /* Find first char after second comma */
-    char *ptr = strchr(strchr(code, ',')+1, ',')+1;
+        if (rcvlen >  AT_RADIO_MAX_RECV_LEN)
+            return; /* Too large */
+        /* Find first char after second comma */
+        char *ptr = strchr(strchr(code, ',')+1, ',')+1;
     
-    for (int i = 0; i < rcvlen; i++) {
-      char hexstr[3];
-      hexstr[0] = *ptr++; hexstr[1] = *ptr++; hexstr[2] = '\0';
-      printf("hexstr %d: '%s' ", i, hexstr);
-      recv_buf[i] = (uint8_t) strtoul(hexstr, NULL, 16);
-      printf("-> %d\n", recv_buf[i]);
+        for (int i = 0; i < rcvlen; i++) {
+            char hexstr[3];
+            hexstr[0] = *ptr++; hexstr[1] = *ptr++; hexstr[2] = '\0';
+            printf("hexstr %d: '%s' ", i, hexstr);
+            recv_buf[i] = (uint8_t) strtoul(hexstr, NULL, 16);
+            printf("-> %d\n", recv_buf[i]);
+        }
+        for (int i = 0; i < rcvlen; i++) {
+            if (isprint(recv_buf[i]))
+                putchar(recv_buf[i]);
+            else
+                printf("0x%02x", recv_buf[i]);
+            putchar(' ');
+        }
+        putchar('\n');
+
+        if (sockid >= SIM7020_MAX_SOCKETS) {
+            printf("Illegal sim socket %d\n", sockid);
+            return;
+        }
+        sim7020_socket_t *sock = &sim7020_sockets[sockid];
+        if (sock->recv_callback != NULL) {
+            sock->recv_callback(sock->recv_callback_arg, recv_buf, rcvlen);
+        }
+        else {
+            printf("sockid %d: no callback\n", sockid);
+        }
     }
-    for (int i = 0; i < rcvlen; i++) {
-      if (isprint(recv_buf[i]))
-        putchar(recv_buf[i]);
-      else
-        printf("0x%02x", recv_buf[i]);
-      putchar(' ');
-    }
-    putchar('\n');
-  }
-  else
-    printf("recv_cb res %d\n", res);
+    else
+        printf("recv_cb res %d\n", res);
 }
 
 void *sim7020_recv_thread(void *arg) {
