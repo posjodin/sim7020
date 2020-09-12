@@ -279,6 +279,17 @@ static int remove_urc(int argc, char **argv)
 }
 #endif
 
+#include "mqttsn_publisher.h"
+int run_mqttsn(int argc, char **argv)
+{
+    if (argc != 1) {
+        printf("Usage: %s\n", argv[0]);
+        return 1;
+    }
+    mqttsn_publisher_init();
+    return 0;
+}
+
 #define SIM7020
 #ifdef SIM7020
 int sim7020cmd_init(int argc, char **argv);
@@ -320,6 +331,7 @@ static const shell_command_t shell_commands[] = {
     { "uclose", "Close SIM7020 socket", sim7020cmd_close },
     { "urecv", "Recv on SIM7020 socket", sim7020cmd_recv },
     { "utest", "repeat usend", sim7020cmd_test },                
+    { "mqttsn", "Run MQTT-SN client", run_mqttsn },                
 #endif /* SIM7020 */
 
     { NULL, NULL, NULL },

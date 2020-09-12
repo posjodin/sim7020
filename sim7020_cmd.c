@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "net/af.h"
 #include "net/ipv4/addr.h"
@@ -67,15 +68,20 @@ int sim7020cmd_status(int argc, char **argv) {
   return res;
 }
 
+static void recv_callback(void *p, const uint8_t *data, uint16_t datalen) {
+    (void) p; (void) data;
+    printf("recv_callback: got %d bytes\n", datalen);
+}
+
 int sim7020cmd_udp_socket(int argc, char **argv) {
   
-  (void) argc; (void) argv;
+(void) argc; (void) argv;
 
-  int res = sim7020_udp_socket();
+  int res = sim7020_udp_socket(recv_callback, NULL);
   if (res < 0)
     printf("Error %d\n", res);
   else
-    printf("Socket %d");
+      printf("Socket %d", res);
   return res;
 }
 
@@ -109,7 +115,8 @@ int sim7020cmd_connect(int argc, char **argv) {
     remote.family = AF_INET6;
     ipv6_addr_t *v6addr = (ipv6_addr_t *) remote.addr.ipv6;
     /* Build ipv4-mapped address */
-    v6addr->u32[0].u32 = 0xffff; v6addr->u32[1].u32 = 0; v6addr->u32[2].u32 = 0;
+    v6addr->u32[0].u32 = 0; v6addr->u32[1].u32 = 0;
+    v6addr->u16[4].u16 = 0; v6addr->u16[5].u16 = 0xffff;
     if (NULL == ipv4_addr_from_str((ipv4_addr_t *) &v6addr->u32[3], argv[2])) {
         printf("Usage: %s sockid ipaddr port\n", argv[0]);
         return 1;

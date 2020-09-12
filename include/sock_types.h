@@ -13,7 +13,9 @@
 
 #include "mbox.h"
 #include "mutex.h"
+#include "net/af.h"
 #include "net/ipv6/addr.h"
+#include "errno.h"
 
 /*
 #include "uip.h"

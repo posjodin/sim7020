@@ -1,16 +1,9 @@
 /*
- * Copyright (C) 2016 Freie Universität Berlin
+ * Copyright (C) Peter Sjödin, KTH
  *
  * This file is subject to the terms and conditions of the GNU Lesser
  * General Public License v2.1. See the file LICENSE in the top level
  * directory for more details.
- */
-
-/**
- * @{
- *
- * @file
- * @author  Martine Lenders <m.lenders@fu-berlin.de>
  */
 
 #include <assert.h>
@@ -23,14 +16,12 @@
 #include "timex.h"
 
 #include "byteorder.h"
-//#include "evproc.h"
 #include "msg.h"
 #include "mutex.h"
 #include "net/af.h"
 #include "net/sock/udp.h"
 #include "net/ipv6/hdr.h"
 #include "sched.h"
-//#include "uip.h"
 #include "xtimer.h"
 
 #include "sim7020.h"
@@ -64,7 +55,7 @@ static void _input_callback(struct udp_socket *c, void *ptr,
                             const uip_ipaddr_t *dst_addr, uint16_t dst_port,
                             const uint8_t *data, uint16_t datalen);
 */
-static void _input_callback(sock_udp_t *c,
+static void _input_callback(void *p,
                             const uint8_t *data, uint16_t datalen);
 
 //static void _output_callback(c_event_t c_event, p_data_t p_data);
@@ -97,17 +88,29 @@ static int _unregister_socket(sock_udp_t *sock) {
 }
 #endif
 
-static int _reg(sock_udp_t *sock, udp_socket_input_callback_t cb,
+static void _ep_print(const sock_udp_ep_t *ep) {
+    if (ep == NULL) {
+        printf("<none>");
+    }
+    else {
+        ipv6_addr_print((ipv6_addr_t *) &ep->addr.ipv6);
+        printf(":%d", ep->port);
+    }
+}
+                      
+static int _reg(sock_udp_t *sock,
                 const sock_udp_ep_t *local, const sock_udp_ep_t *remote)
 {
     if (((local != NULL) && (local->family != AF_INET6)) ||
         ((remote != NULL) && (remote->family != AF_INET6))) {
         return -EAFNOSUPPORT;
     }
-    res = sim7020_udp_socket(_input_callback, sock);
+    int res = sim7020_udp_socket(_input_callback, sock);
     if (res < 0) {
+        printf("_ref failed %d\n", res);
         return res;
     }
+    printf("_reg socket_id %d\n", res);
     sock->sim7020_socket_id = res;
 
 #if 0
@@ -124,9 +127,12 @@ static int _reg(sock_udp_t *sock, udp_socket_input_callback_t cb,
     return 0;
 }
 
+
 int sock_udp_create(sock_udp_t *sock, const sock_udp_ep_t *local,
                     const sock_udp_ep_t *remote, uint16_t flags)
 {
+    printf("sock_udp_create: "); _ep_print(local); printf(" -> "); _ep_print(remote); printf("\n");
+
     int res;
 
     (void)flags;
@@ -139,10 +145,11 @@ int sock_udp_create(sock_udp_t *sock, const sock_udp_ep_t *local,
     mutex_lock(&sock->mutex);
     mbox_init(&sock->mbox, sock->mbox_queue, SOCK_MBOX_SIZE);
     atomic_init(&sock->receivers, 0);
-    if ((res = _reg(sock, _input_callback, local, remote)) < 0) {
+    if ((res = _reg(sock, local, remote)) < 0) {
         sock->recv_callback = NULL;
     }
     mutex_unlock(&sock->mutex);
+    printf(" -> sock_udp_create: %d\n", res);
     return res;
 }
 
@@ -196,7 +203,7 @@ int sock_udp_recv(sock_udp_t *sock, void *data, size_t max_len,
     msg_t msg;
 
     assert((sock != NULL) && (data != NULL) && (max_len > 0));
-    if (sock->recv_callback == NULL) {
+    if (0 && sock->recv_callback == NULL) {
         return -EADDRNOTAVAIL;
     }
     if (timeout == 0) {
@@ -239,6 +246,7 @@ int sock_udp_recv(sock_udp_t *sock, void *data, size_t max_len,
             break;
     }
     atomic_fetch_sub(&sock->receivers, 1);
+    printf("sock_udp_recv -> %d\n", res);
     return res;
 }
 
@@ -249,6 +257,7 @@ int sock_udp_send(sock_udp_t *sock, const void *data, size_t len,
     assert((len == 0) || (data != NULL));   /* (len != 0) => (data != NULL) */
 
     int sockid = sock->sim7020_socket_id;
+    printf("sock_udp_send %d: len %d -> "); _ep_print(remote); printf("\n");
     if (remote != NULL) {
         sim7020_connect(sockid, remote);
     }
@@ -325,18 +334,19 @@ static void _timeout_callback(void *arg)
     mbox_try_put(mbox, &msg);
 }
 
-static void _input_callback(sock_udp_t *sock,
+static void _input_callback(void *p,
                             const uint8_t *data, uint16_t datalen)
 {
     msg_t msg = { .type = _MSG_TYPE_RCV };
-
+    sock_udp_t *sock = (sock_udp_t *) p;
+    
     mutex_lock(&sock->mutex);
 #if 0
     sock->recv_info.src_port = src_port;
     sock->recv_info.src = (const ipv6_addr_t *)src_addr;
 #endif
     sock->recv_info.data = data;
-    sock->recv_info.datalen = datalen - sizeof(ipv6_hdr_t);
+    sock->recv_info.datalen = datalen;
     mutex_unlock(&sock->mutex);
     mbox_put(&sock->mbox, &msg);
 }

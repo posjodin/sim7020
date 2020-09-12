@@ -52,6 +52,11 @@ USEMODULE += shell
 USEMODULE += at
 USEMODULE += at_urc
 USEMODULE += xtimer
+USEMODULE += core_mbox
+
+# For testing:
+USEMODULE += xtimer
+USEMODULE += emcute
 
 # If your application is very simple and doesn't use modules that use
 # messaging, it can be disabled to save some memory:

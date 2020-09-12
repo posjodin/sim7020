@@ -5,6 +5,8 @@
 #define AT_RADIO_MAX_RECV_LEN 1024
 #endif
 
+#define SIM7020_MAX_SEND_LEN 768
+
 #define SIM7020_MAX_SOCKETS 5
 
 typedef void (* sim7020_recv_callback_t)(void *,
