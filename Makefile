@@ -22,14 +22,16 @@ RIOTBASE ?= $(CURDIR)/../RIOT-OS/
 CFLAGS += -DI2C_NUMOF=\(1U\) -DI2C_BUS_SPEED=I2C_SPEED_NORMAL  
 
 # Print incoming AT bytes
-CFLAGS += -DAT_PRINT_INCOMING
+CFLAGS += -DAT_PRINT_INCOMING=1
 
 # Max no of incoming bytes
-CFLAGS += -DAT_RADIO_MAX_RECV_LEN=512
+CFLAGS += -DAT_RADIO_MAX_RECV_LEN=768
 
 # Size of buffer for incoming AT data (hex coded, so twice the
-# size of incoming buffer plus EOL marks and NULL char)
-CFLAGS += -DAT_BUF_SIZE=\(2*AT_RADIO_MAX_RECV_LEN+3\)
+# size of incoming buffer plus EOL marks and NULL char). Also
+# needs to be a power of 2 for thread-safe ring buffer.
+# So, 2*AT_RADIO_MAX_RECV_LEN+3 rounded up to nearest power of 2.
+CFLAGS += -DAT_BUF_SIZE=2048
 
 # If you want to use native with valgrind, you should recompile native
 # with the target all-valgrind instead of all:
