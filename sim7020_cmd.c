@@ -18,7 +18,7 @@
 
 #include "periph/uart.h"
 
-#include "sim7020.h"
+#include "net/sim7020.h"
 
 int sim7020cmd_init(int argc, char **argv) {
   

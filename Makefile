@@ -40,12 +40,14 @@ CFLAGS += -DAT_BUF_SIZE=2048
 # Uncomment this to enable code in RIOT that does safety checking
 # which is not needed in a production environment but helps in the
 # development process:
-#DEVELHELP = 1
+DEVELHELP = 1
 
 # Change this to 0 to show compiler invocation lines by default:
 QUIET ?= 1
 
 # Modules to include:
+
+USEMODULE += sim7020_sock_udp
 
 USEMODULE += ipv6_addr
 USEMODULE += ipv4_addr
@@ -69,6 +71,7 @@ INCLUDES += -I$(CURDIR)/include -DSOCK_HAS_IPV6
 
 # Specify custom dependencies for your application here ...
 # APPDEPS = app_data.h config.h
+APPDEPS = application.h
 
 include $(RIOTBASE)/Makefile.include
 
@@ -76,3 +79,8 @@ include $(RIOTBASE)/Makefile.include
 # otherwise you modify the standard target):
 #proj_data.h: script.py data.tar.gz
 #	./script.py
+
+application.h: Makefile
+	echo '#ifndef APPLICATION' >$@
+	echo '#define APPLICATION "'$(APPLICATION)'"' >>$@
+	echo '#endif' >>$@

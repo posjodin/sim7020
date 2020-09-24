@@ -12,6 +12,7 @@
 
 #include "mqttsn_publisher.h"
 #include "report.h"
+#include "application.h"
 
 int boot_report(uint8_t *buf, size_t len, uint8_t *finished) {
      char *s = (char *) buf;
@@ -21,7 +22,7 @@ int boot_report(uint8_t *buf, size_t len, uint8_t *finished) {
      *finished = 0;
      
      RECORD_START(s + nread, l - nread);
-     PUTFMT(",{\"n\": \"boot;build\",\"vs\":\"RIOT %s\"}",RIOT_VERSION);
+     PUTFMT(",{\"n\": \"boot;build\",\"vs\":\"%s RIOT %s\"}", APPLICATION, RIOT_VERSION);
      RECORD_END(nread);
 
      *finished = 1;
