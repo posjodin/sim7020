@@ -24,7 +24,8 @@ int sim7020cmd_init(int argc, char **argv) {
   
   (void) argc; (void) argv;
 
-  int res = sim7020_init(UART_DEV(1), 9600);
+  //int res = sim7020_init(UART_DEV(1), 9600);
+  int res = sim7020_init();  
   if (res < 0)
     printf("Error %d\n", res);
   else
